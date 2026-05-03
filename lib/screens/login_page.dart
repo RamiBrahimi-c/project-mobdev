@@ -25,15 +25,11 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message ?? "Auth Failed"))
       );
-    } catch (e) {
+    } catch (_) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("An unexpected error occurred"))
       );
     }
-  }
-
-  void showMsg(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -54,7 +50,7 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             TextButton(
                 onPressed: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => ResetPasswordPage()));
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ResetPasswordPage()));
                 },
                 child: const Text("Forgot Password?"),
               ),

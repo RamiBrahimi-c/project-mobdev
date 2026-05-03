@@ -4,15 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-// Import your other files - Make sure these paths match your folder
 import 'services/auth_service.dart'; 
 import 'screens/login_page.dart';
 import 'screens/biometric_screen.dart';
 
 import 'package:fl_chart/fl_chart.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'package:fl_chart/fl_chart.dart'; // Make sure this is in pubspec.yaml
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -150,7 +146,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E293B), // Slate Card
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                   ),
                   child: Row(
                     children: [

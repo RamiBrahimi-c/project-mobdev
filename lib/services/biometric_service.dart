@@ -1,5 +1,6 @@
 import 'package:local_auth/local_auth.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 
 class BiometricService {
   static final _auth = LocalAuthentication();
@@ -38,7 +39,7 @@ class BiometricService {
 
       // return didAuthenticate;
     } catch (e) {
-      print("Error in biometric: $e");
+      debugPrint("Error in biometric: $e");
       return false;
     }
   }

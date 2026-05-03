@@ -76,7 +76,7 @@ class _PlayerPageState extends State<PlayerPage> {
         _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet();
       });
     } catch (e) {
-      print("Error loading favorites: $e");
+      debugPrint("Error loading favorites: $e");
     }
   }
 
