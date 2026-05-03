@@ -33,7 +33,15 @@ class AuthService {
       password: password,
     );
 
-    await _db.collection("users").doc(cred.user!.uid).set({
+    final user = cred.user;
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: "missing-user",
+        message: "Account created, but Firebase did not return a user.",
+      );
+    }
+
+    await _db.collection("users").doc(user.uid).set({
       "firstName": firstName,
       "lastName": lastName,
       "dob": dob.toString().split(" ")[0],
@@ -48,9 +56,9 @@ class AuthService {
     );
   }
 
-  Future<Map<String, dynamic>> getProfile(String uid) async {
+  Future<Map<String, dynamic>?> getProfile(String uid) async {
     final doc = await _db.collection("users").doc(uid).get();
-    return doc.data()!;
+    return doc.data();
   }
 
   Future<void> logout() async {

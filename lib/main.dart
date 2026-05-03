@@ -107,7 +107,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser!;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const LoginPage();
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A), // Midnight Background
       appBar: AppBar(
@@ -121,9 +123,13 @@ class _ProfilePageState extends State<ProfilePage> {
           )
         ],
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
+      body: FutureBuilder<Map<String, dynamic>?>(
         future: AuthService().getProfile(user.uid),
         builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final data = snapshot.data ?? {"firstName": "Guest", "lastName": ""};
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
