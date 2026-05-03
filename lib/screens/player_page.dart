@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async'; // REQUIRED for StreamSubscription
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,10 +19,15 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _isLoading = true;
   bool _isPlaying = false;
   String _currentTitle = "Select a Surah";
-  Set<String> _favoritedIds = {}; // Local track of hearts
+  Set<String> _favoritedIds = {}; 
   
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
+
+  // Handles for our streams (like pointers to listeners)
+  StreamSubscription? _durationSub;
+  StreamSubscription? _positionSub;
+  StreamSubscription? _playerStateSub;
 
   @override
   void initState() {
@@ -29,31 +35,57 @@ class _PlayerPageState extends State<PlayerPage> {
     _fetchData();
     _loadFavorites();
 
-    // Listeners for the Seek Bar (The Sound Bar)
-    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
-    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
-    _audioPlayer.onPlayerStateChanged.listen((state) {
+    // Store subscriptions so we can "free" them later
+    _durationSub = _audioPlayer.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    
+    _positionSub = _audioPlayer.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+
+    _playerStateSub = _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = (state == PlayerState.playing));
     });
   }
 
-  // Load favorites so the hearts are red when you open the page
+  @override
+  void dispose() {
+    // Memory Management: Cancel all listeners when leaving the page
+    _durationSub?.cancel();
+    _positionSub?.cancel();
+    _playerStateSub?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadFavorites() async {
     final user = FirebaseAuth.instance.currentUser;
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user!.uid)
-        .collection('favorites')
-        .get();
-    
-    setState(() {
-      _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet();
-    });
+    if (user == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('favorites')
+          .get();
+      
+      // Safety check: only update state if the user is still looking at this page
+      if (!mounted) return; 
+      
+      setState(() {
+        _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet();
+      });
+    } catch (e) {
+      print("Error loading favorites: $e");
+    }
   }
 
   Future<void> _fetchData() async {
     try {
       final response = await http.get(Uri.parse('https://api.quran.com/api/v4/chapters?language=en'));
+      
+      if (!mounted) return; // Guard against disposed widget
+
       if (response.statusCode == 200) {
         setState(() {
           _tracks = json.decode(response.body)['chapters'];
@@ -61,14 +93,13 @@ class _PlayerPageState extends State<PlayerPage> {
         });
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _play(int id, String name) async {
-    setState(() => _currentTitle = name);
+    if (mounted) setState(() => _currentTitle = name);
     String chapterId = id.toString().padLeft(3, '0');
-    // Using a high-quality stable mp3 link
     String audioUrl = "https://server8.mp3quran.net/afs/$chapterId.mp3"; 
     await _audioPlayer.play(UrlSource(audioUrl));
   }
@@ -80,7 +111,7 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Midnight
+      backgroundColor: const Color(0xFF0F172A), 
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -111,15 +142,18 @@ class _PlayerPageState extends State<PlayerPage> {
                                          color: isFav ? Colors.redAccent : Colors.blueGrey),
                               onPressed: () async {
                                 final user = FirebaseAuth.instance.currentUser;
+                                if (user == null) return;
+
                                 final docRef = FirebaseFirestore.instance
-                                    .collection('users').doc(user!.uid)
+                                    .collection('users').doc(user.uid)
                                     .collection('favorites').doc(chapterId);
+                                
                                 if (isFav) {
                                   await docRef.delete();
-                                  setState(() => _favoritedIds.remove(chapterId));
+                                  if (mounted) setState(() => _favoritedIds.remove(chapterId));
                                 } else {
                                   await docRef.set({'name': chapter['name_simple'], 'id': chapter['id']});
-                                  setState(() => _favoritedIds.add(chapterId));
+                                  if (mounted) setState(() => _favoritedIds.add(chapterId));
                                 }
                               },
                             ),
@@ -132,11 +166,10 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ),
                 
-                // THE GLASSY SOUND BAR (Control Panel)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1E293B), // Slate Blue
+                    color: Color(0xFF1E293B),
                     borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
                   ),
                   child: Column(
@@ -144,7 +177,6 @@ class _PlayerPageState extends State<PlayerPage> {
                       Text(_currentTitle, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       
-                      // THE SOUND BAR SLIDER
                       Slider(
                         value: _position.inSeconds.toDouble(),
                         max: _duration.inSeconds > 0 ? _duration.inSeconds.toDouble() : 1.0,

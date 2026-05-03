@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'signup_page.dart';
 import '../services/auth_service.dart';
@@ -17,16 +18,18 @@ class _LoginPageState extends State<LoginPage> {
   final service = AuthService();
 
   void login() async {
-    if (!service.isValidEmail(loginEmail.text)) {
-      showMsg("Email invalide");
-      return;
+    try {
+      await service.login(loginEmail.text, loginPwd.text);
+    } on FirebaseAuthException catch (e) {
+      // Show a real message instead of crashing
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? "Auth Failed"))
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("An unexpected error occurred"))
+      );
     }
-    if (loginPwd.text.isEmpty) {
-      showMsg("Insert Password");
-      return;
-    }
-
-    await service.login(loginEmail.text, loginPwd.text);
   }
 
   void showMsg(String msg) {
