@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 
@@ -51,14 +52,25 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
-    await service.signup(
-      firstName: firstName.text,
-      lastName: lastName.text,
-      dob: dob!,
-      email: email.text,
-      password: password.text,
-    );
+    try {
+      await service.signup(
+        firstName: firstName.text,
+        lastName: lastName.text,
+        dob: dob!,
+        email: email.text,
+        password: password.text,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      showMsg(e.message ?? "Signup failed");
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      showMsg("An unexpected error occurred");
+      return;
+    }
 
+    if (!mounted) return;
     Navigator.pop(context);
   }
 
