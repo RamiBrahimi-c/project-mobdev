@@ -82,12 +82,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
   _loadGoal() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
   }
 
   _updateGoal(int newGoal) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('monthly_goal', newGoal);
+    if (!mounted) return;
     setState(() => _monthlyGoal = newGoal);
   }
 
