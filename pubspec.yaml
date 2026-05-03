@@ -1,5 +1,5 @@
 name: final_final
-description: "A new Flutter project."
+description: "Android Quran audio player with Firebase auth, biometrics, favorites, and listening stats."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
