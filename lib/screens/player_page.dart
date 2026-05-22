@@ -17,14 +17,17 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage> {
   final AudioPlayer _audioPlayer = AudioManager.player;
   
-  // Data
+  // Data Master Lists
   List _surahs = [];
-  List _filteredSurahs = [];
   List _reciters = [];
+  
+  // Filtered Lists (What the UI sees)
+  List _filteredSurahs = [];
+  List _filteredReciters = [];
+  
   bool _isLoading = true;
   bool _isPlaying = false;
   
-  // Global Audio State
   String _currentTitle = "Select a Surah";
   String _selectedServer = "https://server8.mp3quran.net/afs/"; 
   String _selectedReciterName = "Mishary Alafasy";
@@ -32,7 +35,6 @@ class _PlayerPageState extends State<PlayerPage> {
   Set<String> _favoritedIds = {}; 
   final TextEditingController _searchController = TextEditingController();
 
-  // Progress tracking (The Time)
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
   StreamSubscription? _durationSub;
@@ -45,19 +47,15 @@ class _PlayerPageState extends State<PlayerPage> {
     _fetchInitialData();
     _loadFavorites();
 
-    // Restore Current State
     _isPlaying = _audioPlayer.state == PlayerState.playing;
     _currentTitle = AudioManager.currentTitle;
 
-    // Time Listeners
     _durationSub = _audioPlayer.onDurationChanged.listen((d) {
       if (mounted && d.inSeconds > 0) setState(() => _duration = d);
     });
-    
     _positionSub = _audioPlayer.onPositionChanged.listen((p) {
       if (mounted) setState(() => _position = p);
     });
-
     _playerStateSub = _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = (state == PlayerState.playing));
     });
@@ -69,18 +67,34 @@ class _PlayerPageState extends State<PlayerPage> {
     try {
       final sRes = await http.get(Uri.parse('https://api.quran.com/api/v4/chapters?language=en'));
       final rRes = await http.get(Uri.parse('https://mp3quran.net/api/v3/reciters?language=en'));
+
       if (!mounted) return;
+
       if (sRes.statusCode == 200 && rRes.statusCode == 200) {
         setState(() {
           _surahs = json.decode(sRes.body)['chapters'];
           _filteredSurahs = _surahs;
+          
           _reciters = json.decode(rRes.body)['reciters'];
+          _filteredReciters = _reciters;
+          
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // --- REFACTORED SEARCH LOGIC (Filters both categories) ---
+  void _runFilter(String query) {
+    setState(() {
+      _filteredSurahs = _surahs.where((s) => 
+        s["name_simple"].toLowerCase().contains(query.toLowerCase())).toList();
+        
+      _filteredReciters = _reciters.where((r) => 
+        r["name"].toLowerCase().contains(query.toLowerCase())).toList();
+    });
   }
 
   void _play(int id, String name) async {
@@ -120,14 +134,23 @@ class _PlayerPageState extends State<PlayerPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: const Text("Audio Library", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-          bottom: const TabBar(
-            indicatorColor: Colors.blueAccent,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.blueGrey,
-            tabs: [
-              Tab(text: "Surahs", icon: Icon(Icons.menu_book)),
-              Tab(text: "Reciters", icon: Icon(Icons.person)),
-            ],
+          // FIXED: Search bar is now part of the AppBar for a cleaner look
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(110),
+            child: Column(
+              children: [
+                _buildSearchBar(),
+                const TabBar(
+                  indicatorColor: Colors.blueAccent,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.blueGrey,
+                  tabs: [
+                    Tab(text: "Surahs"),
+                    Tab(text: "Reciters"),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         body: _isLoading 
@@ -137,19 +160,12 @@ class _PlayerPageState extends State<PlayerPage> {
                   Expanded(
                     child: TabBarView(
                       children: [
-                        // TAB 1: SURAHS
-                        Column(
-                          children: [
-                            _buildSearchBar(),
-                            Expanded(child: _buildSurahList()),
-                          ],
-                        ),
-                        // TAB 2: RECITERS
+                        _buildSurahList(),
                         _buildReciterList(),
                       ],
                     ),
                   ),
-                  _buildControlPanel(), // THE FIXED CONTROL PANEL
+                  _buildControlPanel(),
                 ],
               ),
       ),
@@ -158,18 +174,19 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       child: TextField(
         controller: _searchController,
-        onChanged: (v) => setState(() => _filteredSurahs = _surahs.where((s) => s["name_simple"].toLowerCase().contains(v.toLowerCase())).toList()),
+        onChanged: _runFilter,
         style: const TextStyle(color: Colors.white),
         decoration: InputDecoration(
-          hintText: "Search Surah...",
-          hintStyle: const TextStyle(color: Colors.blueGrey),
-          prefixIcon: const Icon(Icons.search, color: Colors.blueAccent),
+          hintText: "Search library...",
+          hintStyle: const TextStyle(color: Colors.blueGrey, fontSize: 14),
+          prefixIcon: const Icon(Icons.search, color: Colors.blueAccent, size: 20),
           filled: true,
           fillColor: const Color(0xFF1E293B),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+          contentPadding: const EdgeInsets.symmetric(vertical: 0),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         ),
       ),
     );
@@ -198,28 +215,29 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Widget _buildReciterList() {
     return ListView.builder(
-      itemCount: _reciters.length > 50 ? 50 : _reciters.length,
+      itemCount: _filteredReciters.length,
       itemBuilder: (context, index) {
-        final reciter = _reciters[index];
+        final reciter = _filteredReciters[index];
         bool isSelected = _selectedReciterName == reciter['name'];
         return ListTile(
           leading: Icon(Icons.mic, color: isSelected ? Colors.blueAccent : Colors.blueGrey),
           title: Text(reciter['name'], style: TextStyle(color: isSelected ? Colors.blueAccent : Colors.white)),
+          trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.blueAccent) : null,
           onTap: () {
             setState(() {
               _selectedReciterName = reciter['name'];
               _selectedServer = reciter['moshaf'][0]['server'];
             });
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Switched to $_selectedReciterName"), duration: const Duration(seconds: 1)));
           },
         );
       },
     );
   }
 
-  // --- RE-BUILT CONTROL PANEL WITH VISIBLE TIME ---
   Widget _buildControlPanel() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       decoration: const BoxDecoration(
         color: Color(0xFF1E293B),
         borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
@@ -228,17 +246,12 @@ class _PlayerPageState extends State<PlayerPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(_currentTitle, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 5),
-          
           Slider(
             value: _position.inSeconds.toDouble().clamp(0.0, _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0),
             max: _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0,
             activeColor: Colors.blueAccent,
-            inactiveColor: Colors.white10,
             onChanged: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
           ),
-          
-          // THE TIME ROW (Restored and color-fixed)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -249,7 +262,6 @@ class _PlayerPageState extends State<PlayerPage> {
               ],
             ),
           ),
-          
           IconButton(
             iconSize: 56,
             icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
