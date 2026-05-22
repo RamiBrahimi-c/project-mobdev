@@ -6,6 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/audio_manager.dart';
+import 'package:flutter/services.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -15,15 +16,25 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> {
   final AudioPlayer _audioPlayer = AudioManager.player;
-  List _tracks = [];
+  
+  // Data
+  List _surahs = [];
+  List _filteredSurahs = [];
+  List _reciters = [];
   bool _isLoading = true;
   bool _isPlaying = false;
-  String _currentTitle = "Select a Surah";
-  Set<String> _favoritedIds = {}; // Local track of hearts
   
+  // Global Audio State
+  String _currentTitle = "Select a Surah";
+  String _selectedServer = "https://server8.mp3quran.net/afs/"; 
+  String _selectedReciterName = "Mishary Alafasy";
+  
+  Set<String> _favoritedIds = {}; 
+  final TextEditingController _searchController = TextEditingController();
+
+  // Progress tracking (The Time)
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
-
   StreamSubscription? _durationSub;
   StreamSubscription? _positionSub;
   StreamSubscription? _playerStateSub;
@@ -31,14 +42,14 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
-    _fetchData();
+    _fetchInitialData();
     _loadFavorites();
 
-    // 1. RESTORE STATE
+    // Restore Current State
     _isPlaying = _audioPlayer.state == PlayerState.playing;
     _currentTitle = AudioManager.currentTitle;
 
-    // 2. LISTENERS (For moving bar)
+    // Time Listeners
     _durationSub = _audioPlayer.onDurationChanged.listen((d) {
       if (mounted && d.inSeconds > 0) setState(() => _duration = d);
     });
@@ -51,20 +62,24 @@ class _PlayerPageState extends State<PlayerPage> {
       if (mounted) setState(() => _isPlaying = (state == PlayerState.playing));
     });
 
-    if (AudioManager.hasActiveTrack) {
-      _syncExistingPlayer();
-    }
+    if (AudioManager.hasActiveTrack) _syncExistingPlayer();
   }
 
-  void _syncExistingPlayer() async {
-    final d = await _audioPlayer.getDuration();
-    final p = await _audioPlayer.getCurrentPosition();
-    if (mounted) {
-      setState(() {
-        _isPlaying = _audioPlayer.state == PlayerState.playing;
-        if (d != null) _duration = d;
-        if (p != null) _position = p;
-      });
+  Future<void> _fetchInitialData() async {
+    try {
+      final sRes = await http.get(Uri.parse('https://api.quran.com/api/v4/chapters?language=en'));
+      final rRes = await http.get(Uri.parse('https://mp3quran.net/api/v3/reciters?language=en'));
+      if (!mounted) return;
+      if (sRes.statusCode == 200 && rRes.statusCode == 200) {
+        setState(() {
+          _surahs = json.decode(sRes.body)['chapters'];
+          _filteredSurahs = _surahs;
+          _reciters = json.decode(rRes.body)['reciters'];
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -76,44 +91,197 @@ class _PlayerPageState extends State<PlayerPage> {
         _duration = Duration.zero; 
       });
     }
-
     AudioManager.currentTitle = name;
     AudioManager.hasActiveTrack = true;
-
     String chapterId = id.toString().padLeft(3, '0');
-    String audioUrl = "https://server8.mp3quran.net/afs/$chapterId.mp3"; 
-    
-    await _audioPlayer.play(UrlSource(audioUrl));
+    await _audioPlayer.play(UrlSource("$_selectedServer$chapterId.mp3"));
     Future.delayed(const Duration(seconds: 2), () => _syncExistingPlayer());
+  }
+
+  String _formatDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    return "${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";
   }
 
   @override
   void dispose() {
-    _durationSub?.cancel();
-    _positionSub?.cancel();
-    _playerStateSub?.cancel();
+    _durationSub?.cancel(); _positionSub?.cancel(); _playerStateSub?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchData() async {
-    try {
-      final response = await http.get(Uri.parse('https://api.quran.com/api/v4/chapters?language=en'));
-      if (!mounted) return;
-      if (response.statusCode == 200) {
-        setState(() {
-          _tracks = json.decode(response.body)['chapters'];
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text("Audio Library", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          bottom: const TabBar(
+            indicatorColor: Colors.blueAccent,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.blueGrey,
+            tabs: [
+              Tab(text: "Surahs", icon: Icon(Icons.menu_book)),
+              Tab(text: "Reciters", icon: Icon(Icons.person)),
+            ],
+          ),
+        ),
+        body: _isLoading 
+            ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
+            : Column(
+                children: [
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        // TAB 1: SURAHS
+                        Column(
+                          children: [
+                            _buildSearchBar(),
+                            Expanded(child: _buildSurahList()),
+                          ],
+                        ),
+                        // TAB 2: RECITERS
+                        _buildReciterList(),
+                      ],
+                    ),
+                  ),
+                  _buildControlPanel(), // THE FIXED CONTROL PANEL
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _filteredSurahs = _surahs.where((s) => s["name_simple"].toLowerCase().contains(v.toLowerCase())).toList()),
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: "Search Surah...",
+          hintStyle: const TextStyle(color: Colors.blueGrey),
+          prefixIcon: const Icon(Icons.search, color: Colors.blueAccent),
+          filled: true,
+          fillColor: const Color(0xFF1E293B),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSurahList() {
+    return ListView.builder(
+      itemCount: _filteredSurahs.length,
+      itemBuilder: (context, index) {
+        final chapter = _filteredSurahs[index];
+        final id = chapter['id'].toString();
+        bool isFav = _favoritedIds.contains(id);
+        return ListTile(
+          leading: Text(id, style: const TextStyle(color: Colors.blueGrey)),
+          title: Text(chapter['name_simple'], style: const TextStyle(color: Colors.white)),
+          subtitle: Text("Voice: $_selectedReciterName", style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
+          trailing: IconButton(
+            icon: Icon(isFav ? Icons.favorite : Icons.favorite_border, color: isFav ? Colors.redAccent : Colors.blueGrey),
+            onPressed: () => _toggleFavorite(id, chapter['name_simple']),
+          ),
+          onTap: () => _play(chapter['id'], chapter['name_simple']),
+        );
+      },
+    );
+  }
+
+  Widget _buildReciterList() {
+    return ListView.builder(
+      itemCount: _reciters.length > 50 ? 50 : _reciters.length,
+      itemBuilder: (context, index) {
+        final reciter = _reciters[index];
+        bool isSelected = _selectedReciterName == reciter['name'];
+        return ListTile(
+          leading: Icon(Icons.mic, color: isSelected ? Colors.blueAccent : Colors.blueGrey),
+          title: Text(reciter['name'], style: TextStyle(color: isSelected ? Colors.blueAccent : Colors.white)),
+          onTap: () {
+            setState(() {
+              _selectedReciterName = reciter['name'];
+              _selectedServer = reciter['moshaf'][0]['server'];
+            });
+          },
+        );
+      },
+    );
+  }
+
+  // --- RE-BUILT CONTROL PANEL WITH VISIBLE TIME ---
+  Widget _buildControlPanel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E293B),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_currentTitle, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 5),
+          
+          Slider(
+            value: _position.inSeconds.toDouble().clamp(0.0, _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0),
+            max: _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0,
+            activeColor: Colors.blueAccent,
+            inactiveColor: Colors.white10,
+            onChanged: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
+          ),
+          
+          // THE TIME ROW (Restored and color-fixed)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(_formatDuration(_position), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(_formatDuration(_duration), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+          
+          IconButton(
+            iconSize: 56,
+            icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
+            color: Colors.white,
+            onPressed: () => _isPlaying ? _audioPlayer.pause() : _audioPlayer.resume(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleFavorite(String id, String name) async {
+    HapticFeedback.lightImpact();
+    final user = FirebaseAuth.instance.currentUser;
+    final docRef = FirebaseFirestore.instance.collection('users').doc(user!.uid).collection('favorites').doc(id);
+    if (_favoritedIds.contains(id)) {
+      await docRef.delete();
+      setState(() => _favoritedIds.remove(id));
+    } else {
+      await docRef.set({'name': name, 'id': int.parse(id)});
+      setState(() => _favoritedIds.add(id));
     }
   }
 
-  String _formatDuration(Duration d) {
-    if (d == Duration.zero) return "00:00";
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    return "${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";
+  void _syncExistingPlayer() async {
+    final d = await _audioPlayer.getDuration();
+    final p = await _audioPlayer.getCurrentPosition();
+    if (mounted) setState(() {
+      _isPlaying = _audioPlayer.state == PlayerState.playing;
+      if (d != null) _duration = d;
+      if (p != null) _position = p;
+    });
   }
 
   Future<void> _loadFavorites() async {
@@ -121,108 +289,5 @@ class _PlayerPageState extends State<PlayerPage> {
     if (user == null) return;
     final snapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).collection('favorites').get();
     if (mounted) setState(() => _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), 
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text("Audio Library", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: _isLoading 
-          ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
-          : Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _tracks.length,
-                    itemBuilder: (context, index) {
-                      final chapter = _tracks[index];
-                      final String chapterId = chapter['id'].toString();
-                      bool isFav = _favoritedIds.contains(chapterId);
-
-                      return ListTile(
-                        leading: Text(chapterId, style: const TextStyle(color: Colors.blueGrey)),
-                        title: Text(chapter['name_simple'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-                        subtitle: Text(chapter['translated_name']['name'], style: const TextStyle(color: Colors.grey)),
-                        // --- RESTORED FAVORITE BUTTON ---
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(isFav ? Icons.favorite : Icons.favorite_border, 
-                                         color: isFav ? Colors.redAccent : Colors.blueGrey),
-                              onPressed: () async {
-                                final user = FirebaseAuth.instance.currentUser;
-                                if (user == null) return;
-                                final docRef = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('favorites').doc(chapterId);
-                                if (isFav) {
-                                  await docRef.delete();
-                                  if (mounted) setState(() => _favoritedIds.remove(chapterId));
-                                } else {
-                                  await docRef.set({'name': chapter['name_simple'], 'id': chapter['id']});
-                                  if (mounted) setState(() => _favoritedIds.add(chapterId));
-                                }
-                              },
-                            ),
-                            const Icon(Icons.play_arrow, color: Colors.blueAccent),
-                          ],
-                        ),
-                        onTap: () => _play(chapter['id'], chapter['name_simple']),
-                      );
-                    },
-                  ),
-                ),
-                
-                // BOTTOM CONTROL PANEL
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1E293B),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(_currentTitle, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-                      
-                      Slider(
-                        value: _position.inSeconds.toDouble().clamp(0.0, _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0),
-                        max: _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0,
-                        activeColor: Colors.blueAccent,
-                        inactiveColor: Colors.white10,
-                        onChanged: (v) async {
-                          await _audioPlayer.seek(Duration(seconds: v.toInt()));
-                        },
-                      ),
-                      
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(_formatDuration(_position), style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
-                            Text(_formatDuration(_duration), style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 10),
-                      IconButton(
-                        iconSize: 64,
-                        icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
-                        color: Colors.white,
-                        onPressed: () => _isPlaying ? _audioPlayer.pause() : _audioPlayer.resume(),
-                      ),
-                    ],
-                  ),
-                )
-              ],
-            ),
-    );
   }
 }
