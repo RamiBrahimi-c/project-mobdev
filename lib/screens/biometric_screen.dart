@@ -11,7 +11,7 @@ class BiometricScreen extends StatefulWidget {
 
 class _BiometricScreenState extends State<BiometricScreen> {
   bool _isAuthenticating = false;
-  bool _didSucceed = false; // Add this to prevent double-firing
+  bool _didSucceed = false; // to prevent double-firing
 
   @override
   void initState() {

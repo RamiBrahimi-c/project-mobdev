@@ -107,7 +107,6 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
-  // (Keep your existing _loadGoal, _updateGoal, _getTotalTime, and _secureDelete functions)
   _loadGoal() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
@@ -146,7 +145,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
       body: FutureBuilder<Map<String, dynamic>?>(
-        future: _profileFuture, // 3. USE THE CACHED FUTURE VARIABLE HERE
+        future: _profileFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -218,7 +217,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // (Keep your _buildMiniPlayer, _buildStatTile, _buildGoalTile, and _buildFavoritesList code as is)
   Widget _buildMiniPlayer() {
     double progress = _position.inSeconds / (_duration.inSeconds > 0 ? _duration.inSeconds : 1);
     return GestureDetector(
