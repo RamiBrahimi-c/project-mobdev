@@ -46,7 +46,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
+  flutter_launcher_icons: ^0.14.3
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -56,6 +56,15 @@ dev_dependencies:
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
+
+
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png" # Path to your 1024x1024 PNG file
+  android: true                      # Generate icons for Android
+  ios: true                          # Generate icons for iOS
+  remove_alpha_ios: true             # Remove transparency for iOS icons
+  # adaptive_icon_background: "#ffffff" # (Optional) For Android adaptive icons
+  # adaptive_icon_foreground: "assets/icon/icon-foreground.png"
 
 # The following section is specific to Flutter packages.
 flutter:
