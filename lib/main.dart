@@ -65,7 +65,6 @@ class ProfilePage extends StatefulWidget {
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
-
 class _ProfilePageState extends State<ProfilePage> {
   int _monthlyGoal = 20;
   final List<double> _dailyMinutes = [45, 120, 30, 90, 60, 15, 100]; 
@@ -78,14 +77,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
   _loadGoal() async {
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
     setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
   }
 
   _updateGoal(int newGoal) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('monthly_goal', newGoal);
-    if (!mounted) return;
     setState(() => _monthlyGoal = newGoal);
   }
 
@@ -105,71 +102,71 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const LoginPage();
-
+    final user = FirebaseAuth.instance.currentUser!;
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Midnight Background
+      backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
-        title: const Text("Stats", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        title: const Text("Control Center", style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           IconButton(
             onPressed: () { AudioManager.stopAll(); AuthService().logout(); },
-            icon: const Icon(Icons.power_settings_new, color: Colors.redAccent)
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent)
           )
         ],
       ),
       body: FutureBuilder<Map<String, dynamic>?>(
         future: AuthService().getProfile(user.uid),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
+           if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Center(child: CircularProgressIndicator());
+    }
           final data = snapshot.data ?? {"firstName": "Guest", "lastName": ""};
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. Sleek Welcome Section
-                Text("Hello,", style: TextStyle(color: Colors.blueGrey[300], fontSize: 18)),
-                Text("${data['firstName']} ${data['lastName']}", 
-                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                
-                // 2. Time Card
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B), // Slate Card
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-                  ),
-                  child: Row(
+                // 1. DYNAMIC WELCOME
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(color: Colors.white, fontSize: 24),
                     children: [
-                      const Icon(Icons.waves, color: Colors.blueAccent),
-                      const SizedBox(width: 15),
-                      Text("Total Time: ${_getTotalTime()}", 
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500)),
+                      const TextSpan(text: "Hello, "),
+                      TextSpan(text: "${data['firstName']} ${data['lastName']}", 
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
                     ],
                   ),
                 ),
+                const SizedBox(height: 25),
 
-                const SizedBox(height: 35),
-                const Text("Activity", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                // 2. NOW PLAYING CARD (Makes the home page feel relevant)
+                if (AudioManager.hasActiveTrack) 
+                  _buildNowPlayingCard(),
+
+                const SizedBox(height: 30),
+                const Text("Usage Statistics", style: TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 1.1)),
                 const SizedBox(height: 15),
 
-                // 3. Neon Histogram
+                // 3. STATS GRID (Total Time + Goal)
+                Row(
+                  children: [
+                    Expanded(child: _buildStatTile("Listen Time", _getTotalTime(), Icons.timer_outlined)),
+                    const SizedBox(width: 15),
+                    Expanded(child: _buildGoalTile()),
+                  ],
+                ),
+
+                const SizedBox(height: 25),
+
+                // 4. THE REQUIREMENT: HISTOGRAM
+                const Text("Monthly Activity", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                const SizedBox(height: 15),
                 Container(
                   height: 180,
-                  padding: const EdgeInsets.only(top: 20, right: 20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20)),
                   child: BarChart(
                     BarChartData(
                       borderData: FlBorderData(show: false),
@@ -177,45 +174,35 @@ class _ProfilePageState extends State<ProfilePage> {
                       titlesData: const FlTitlesData(show: false),
                       barGroups: _dailyMinutes.asMap().entries.map((e) => 
                         BarChartGroupData(x: e.key, barRods: [
-                          BarChartRodData(
-                            toY: e.value, 
-                            color: Colors.blueAccent, 
-                            width: 12, 
-                            borderRadius: BorderRadius.circular(6),
-                            backDrawRodData: BackgroundBarChartRodData(show: true, toY: 150, color: const Color(0xFF334155))
-                          )
+                          BarChartRodData(toY: e.value, color: Colors.blueAccent, width: 12, borderRadius: BorderRadius.circular(4))
                         ])
                       ).toList(),
                     ),
                   ),
                 ),
 
-                const SizedBox(height: 30),
-                // 4. Goal Card
-                _buildGoalSection(),
-
                 const SizedBox(height: 35),
-                // 5. High-Contrast Action Button
+                // 5. MAIN ACTION BUTTON
                 SizedBox(
                   width: double.infinity,
-                  height: 65,
-                  child: ElevatedButton(
+                  height: 60,
+                  child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white, // Pop against dark background
+                      backgroundColor: Colors.white,
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                     onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerPage())),
-                    child: const Text("OPEN LIBRARY", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    icon: const Icon(Icons.library_music_rounded),
+                    label: const Text("OPEN AUDIO LIBRARY", style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
 
                 const SizedBox(height: 35),
-                const Text("Favorites", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                const Text("Secure Favorites", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 _buildFavoritesList(user.uid),
               ],
-              
             ),
           );
         },
@@ -223,38 +210,79 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildGoalSection() {
-    double progress = (_dailyMinutes.reduce((a, b) => a + b) / 60) / _monthlyGoal;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Monthly Goal", style: TextStyle(color: Colors.white)),
-              DropdownButton<int>(
-                value: _monthlyGoal,
-                dropdownColor: const Color(0xFF1E293B),
-                underline: const SizedBox(),
-                items: [10, 20, 30, 40].map((int val) => DropdownMenuItem(value: val, child: Text("$val hrs"))).toList(),
-                onChanged: (val) => _updateGoal(val!),
+  // --- COMPONENT WIDGETS ---
+
+  Widget _buildNowPlayingCard() {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlayerPage())),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [Colors.blueAccent, Colors.blueAccent.withOpacity(0.6)]),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.graphic_eq, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("CONTINUE LISTENING", style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+                  Text(AudioManager.currentTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                ],
               ),
-            ],
-          ),
+            ),
+            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatTile(String title, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(15)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.blueAccent, size: 20),
           const SizedBox(height: 10),
+          Text(title, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(value, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGoalTile() {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(15)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButton<int>(
+            value: _monthlyGoal,
+            dropdownColor: const Color(0xFF1E293B),
+            isDense: true,
+            underline: const SizedBox(),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            items: [10, 20, 30, 40].map((int val) => DropdownMenuItem(value: val, child: Text("$val hrs"))).toList(),
+            onChanged: (val) => _updateGoal(val!),
+          ),
+          const SizedBox(height: 5),
+          const Text("Monthly Target", style: TextStyle(color: Colors.white54, fontSize: 12)),
+          const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: progress.clamp(0.0, 1.0),
-            backgroundColor: const Color(0xFF334155),
-            color: Colors.blueAccent,
-            minHeight: 8,
+            value: (_dailyMinutes.reduce((a, b) => a + b) / 60) / _monthlyGoal,
+            backgroundColor: Colors.white10,
+            color: Colors.greenAccent,
+            minHeight: 4,
           ),
         ],
-        
       ),
     );
   }
@@ -272,13 +300,14 @@ class _ProfilePageState extends State<ProfilePage> {
           itemBuilder: (context, index) {
             final fav = docs[index];
             return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(15)),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
               child: ListTile(
-                leading: const Icon(Icons.favorite, color: Colors.pinkAccent),
-                title: Text(fav['name'], style: const TextStyle(color: Colors.white)),
+                dense: true,
+                leading: const Icon(Icons.favorite, color: Colors.pinkAccent, size: 18),
+                title: Text(fav['name'], style: const TextStyle(color: Colors.white, fontSize: 14)),
                 trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.blueGrey),
+                  icon: const Icon(Icons.delete_outline, color: Colors.white24, size: 18),
                   onPressed: () => _secureDelete(fav.reference),
                 ),
               ),
@@ -289,3 +318,11 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
+
+
+
+
+
+
+
+
