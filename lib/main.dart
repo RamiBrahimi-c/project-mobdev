@@ -1,17 +1,17 @@
+import 'dart:async'; // Required for memory management
+import 'package:audioplayers/audioplayers.dart';
 import 'package:final_final/services/audio_manager.dart';
 import 'package:final_final/services/biometric_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/auth_service.dart'; 
 import 'screens/login_page.dart';
 import 'screens/biometric_screen.dart';
-
-import 'package:fl_chart/fl_chart.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'screens/player_page.dart'; 
 
 void main() async {
@@ -20,13 +20,14 @@ void main() async {
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark().copyWith(
-      scaffoldBackgroundColor: const Color(0xFF0F172A), // Deep Midnight Blue
+      scaffoldBackgroundColor: const Color(0xFF0F172A), // Midnight
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent, brightness: Brightness.dark),
     ),
     home: const AppStartGate(),
   ));
 }
 
+// THE BIOMETRIC WALL
 class AppStartGate extends StatefulWidget {
   const AppStartGate({super.key});
   @override
@@ -38,15 +39,12 @@ class _AppStartGateState extends State<AppStartGate> {
 
   @override
   Widget build(BuildContext context) {
-    // LOCK: If not unlocked, show ONLY the Biometric Screen. 
-    // This stops Firebase from even trying to run.
     if (!_isUnlocked) {
       return BiometricScreen(onSuccess: () {
         setState(() => _isUnlocked = true);
       });
     }
 
-    // UNLOCK: Now we let Firebase take over.
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
@@ -60,6 +58,7 @@ class _AppStartGateState extends State<AppStartGate> {
   }
 }
 
+// THE DASHBOARD
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
   @override
@@ -69,35 +68,62 @@ class _ProfilePageState extends State<ProfilePage> {
   int _monthlyGoal = 20;
   final List<double> _dailyMinutes = [45, 120, 30, 90, 60, 15, 100]; 
 
+  // 1. CREATE A VARIABLE TO HOLD THE PROFILE FUTURE
+  late Future<Map<String, dynamic>?> _profileFuture;
+
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  StreamSubscription? _posSub;
+  StreamSubscription? _durSub;
+  StreamSubscription? _stateSub;
+
   @override
   void initState() {
     super.initState();
     _loadGoal();
+    
+    // 2. INITIALIZE THE FUTURE ONCE HERE
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _profileFuture = AuthService().getProfile(user.uid);
+    }
+
+    _isPlaying = AudioManager.player.state == PlayerState.playing;
+    _stateSub = AudioManager.player.onPlayerStateChanged.listen((s) {
+      if (mounted) setState(() => _isPlaying = s == PlayerState.playing);
+    });
+    _posSub = AudioManager.player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _durSub = AudioManager.player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
   }
 
+  @override
+  void dispose() {
+    _posSub?.cancel(); _durSub?.cancel(); _stateSub?.cancel();
+    super.dispose();
+  }
+
+  // (Keep your existing _loadGoal, _updateGoal, _getTotalTime, and _secureDelete functions)
   _loadGoal() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
+    if (mounted) setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
   }
-
   _updateGoal(int newGoal) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('monthly_goal', newGoal);
     setState(() => _monthlyGoal = newGoal);
   }
-
   String _getTotalTime() {
     double totalMinutes = _dailyMinutes.reduce((a, b) => a + b);
-    int hours = (totalMinutes / 60).floor();
-    int minutes = (totalMinutes % 60).toInt();
-    return "$hours h ${minutes} m";
+    return "${(totalMinutes / 60).floor()} h ${(totalMinutes % 60).toInt()} m";
   }
-
   void _secureDelete(DocumentReference docRef) async {
     bool authenticated = await BiometricService.authenticate();
-    if (authenticated) {
-      await docRef.delete();
-    }
+    if (authenticated) await docRef.delete();
   }
 
   @override
@@ -105,6 +131,9 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = FirebaseAuth.instance.currentUser!;
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
+      // PERSISTENT MINI PLAYER
+      bottomNavigationBar: AudioManager.hasActiveTrack ? _buildMiniPlayer() : null,
+      
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
@@ -117,18 +146,19 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
       body: FutureBuilder<Map<String, dynamic>?>(
-        future: AuthService().getProfile(user.uid),
+        future: _profileFuture, // 3. USE THE CACHED FUTURE VARIABLE HERE
         builder: (context, snapshot) {
-           if (snapshot.connectionState == ConnectionState.waiting) {
-      return const Center(child: CircularProgressIndicator());
-    }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          
           final data = snapshot.data ?? {"firstName": "Guest", "lastName": ""};
+          
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 120),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. DYNAMIC WELCOME
                 RichText(
                   text: TextSpan(
                     style: const TextStyle(color: Colors.white, fontSize: 24),
@@ -140,16 +170,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 25),
-
-                // 2. NOW PLAYING CARD (Makes the home page feel relevant)
-                if (AudioManager.hasActiveTrack) 
-                  _buildNowPlayingCard(),
-
-                const SizedBox(height: 30),
-                const Text("Usage Statistics", style: TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 1.1)),
-                const SizedBox(height: 15),
-
-                // 3. STATS GRID (Total Time + Goal)
                 Row(
                   children: [
                     Expanded(child: _buildStatTile("Listen Time", _getTotalTime(), Icons.timer_outlined)),
@@ -157,12 +177,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     Expanded(child: _buildGoalTile()),
                   ],
                 ),
-
                 const SizedBox(height: 25),
-
-                // 4. THE REQUIREMENT: HISTOGRAM
-                const Text("Monthly Activity", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                const SizedBox(height: 15),
                 Container(
                   height: 180,
                   padding: const EdgeInsets.all(20),
@@ -180,24 +195,17 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 35),
-                // 5. MAIN ACTION BUTTON
                 SizedBox(
                   width: double.infinity,
                   height: 60,
                   child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                     onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerPage())),
                     icon: const Icon(Icons.library_music_rounded),
                     label: const Text("OPEN AUDIO LIBRARY", style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
-
                 const SizedBox(height: 35),
                 const Text("Secure Favorites", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
@@ -210,31 +218,28 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- COMPONENT WIDGETS ---
-
-  Widget _buildNowPlayingCard() {
+  // (Keep your _buildMiniPlayer, _buildStatTile, _buildGoalTile, and _buildFavoritesList code as is)
+  Widget _buildMiniPlayer() {
+    double progress = _position.inSeconds / (_duration.inSeconds > 0 ? _duration.inSeconds : 1);
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlayerPage())),
       child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [Colors.blueAccent, Colors.blueAccent.withOpacity(0.6)]),
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: Row(
+        height: 80,
+        margin: const EdgeInsets.all(15),
+        decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10)]),
+        child: Column(
           children: [
-            const Icon(Icons.graphic_eq, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("CONTINUE LISTENING", style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
-                  Text(AudioManager.currentTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                ],
+            LinearProgressIndicator(value: progress.clamp(0.0, 1.0), minHeight: 2, backgroundColor: Colors.white10, color: Colors.blueAccent),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.graphic_eq, color: Colors.blueAccent),
+              title: Text(AudioManager.currentTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+              subtitle: const Text("TAP TO OPEN", style: TextStyle(color: Colors.white38, fontSize: 10)),
+              trailing: IconButton(
+                icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Colors.white, size: 32),
+                onPressed: () => _isPlaying ? AudioManager.player.pause() : AudioManager.player.resume(),
               ),
             ),
-            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white),
           ],
         ),
       ),
@@ -277,7 +282,7 @@ class _ProfilePageState extends State<ProfilePage> {
           const Text("Monthly Target", style: TextStyle(color: Colors.white54, fontSize: 12)),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: (_dailyMinutes.reduce((a, b) => a + b) / 60) / _monthlyGoal,
+            value: ((_dailyMinutes.reduce((a, b) => a + b) / 60) / _monthlyGoal).clamp(0.0, 1.0),
             backgroundColor: Colors.white10,
             color: Colors.greenAccent,
             minHeight: 4,
@@ -318,11 +323,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
-
-
-
-
-
 
 
 
