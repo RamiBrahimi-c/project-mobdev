@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:async'; // REQUIRED for StreamSubscription
+import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -19,12 +19,11 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _isLoading = true;
   bool _isPlaying = false;
   String _currentTitle = "Select a Surah";
-  Set<String> _favoritedIds = {}; 
+  Set<String> _favoritedIds = {}; // Local track of hearts
   
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
 
-  // Handles for our streams (like pointers to listeners)
   StreamSubscription? _durationSub;
   StreamSubscription? _positionSub;
   StreamSubscription? _playerStateSub;
@@ -35,9 +34,13 @@ class _PlayerPageState extends State<PlayerPage> {
     _fetchData();
     _loadFavorites();
 
-    // Store subscriptions so we can "free" them later
+    // 1. RESTORE STATE
+    _isPlaying = _audioPlayer.state == PlayerState.playing;
+    _currentTitle = AudioManager.currentTitle;
+
+    // 2. LISTENERS (For moving bar)
     _durationSub = _audioPlayer.onDurationChanged.listen((d) {
-      if (mounted) setState(() => _duration = d);
+      if (mounted && d.inSeconds > 0) setState(() => _duration = d);
     });
     
     _positionSub = _audioPlayer.onPositionChanged.listen((p) {
@@ -47,45 +50,55 @@ class _PlayerPageState extends State<PlayerPage> {
     _playerStateSub = _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = (state == PlayerState.playing));
     });
+
+    if (AudioManager.hasActiveTrack) {
+      _syncExistingPlayer();
+    }
+  }
+
+  void _syncExistingPlayer() async {
+    final d = await _audioPlayer.getDuration();
+    final p = await _audioPlayer.getCurrentPosition();
+    if (mounted) {
+      setState(() {
+        _isPlaying = _audioPlayer.state == PlayerState.playing;
+        if (d != null) _duration = d;
+        if (p != null) _position = p;
+      });
+    }
+  }
+
+  void _play(int id, String name) async {
+    if (mounted) {
+      setState(() {
+        _currentTitle = name;
+        _position = Duration.zero; 
+        _duration = Duration.zero; 
+      });
+    }
+
+    AudioManager.currentTitle = name;
+    AudioManager.hasActiveTrack = true;
+
+    String chapterId = id.toString().padLeft(3, '0');
+    String audioUrl = "https://server8.mp3quran.net/afs/$chapterId.mp3"; 
+    
+    await _audioPlayer.play(UrlSource(audioUrl));
+    Future.delayed(const Duration(seconds: 2), () => _syncExistingPlayer());
   }
 
   @override
   void dispose() {
-    // Memory Management: Cancel all listeners when leaving the page
     _durationSub?.cancel();
     _positionSub?.cancel();
     _playerStateSub?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadFavorites() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('favorites')
-          .get();
-      
-      // Safety check: only update state if the user is still looking at this page
-      if (!mounted) return; 
-      
-      setState(() {
-        _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet();
-      });
-    } catch (e) {
-      debugPrint("Error loading favorites: $e");
-    }
-  }
-
   Future<void> _fetchData() async {
     try {
       final response = await http.get(Uri.parse('https://api.quran.com/api/v4/chapters?language=en'));
-      
-      if (!mounted) return; // Guard against disposed widget
-
+      if (!mounted) return;
       if (response.statusCode == 200) {
         setState(() {
           _tracks = json.decode(response.body)['chapters'];
@@ -97,15 +110,17 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
-  void _play(int id, String name) async {
-    if (mounted) setState(() => _currentTitle = name);
-    String chapterId = id.toString().padLeft(3, '0');
-    String audioUrl = "https://server8.mp3quran.net/afs/$chapterId.mp3"; 
-    await _audioPlayer.play(UrlSource(audioUrl));
+  String _formatDuration(Duration d) {
+    if (d == Duration.zero) return "00:00";
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    return "${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";
   }
 
-  String _formatDuration(Duration d) {
-    return d.toString().split('.').first.padLeft(8, "0").substring(3);
+  Future<void> _loadFavorites() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final snapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).collection('favorites').get();
+    if (mounted) setState(() => _favoritedIds = snapshot.docs.map((doc) => doc.id).toSet());
   }
 
   @override
@@ -134,6 +149,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         leading: Text(chapterId, style: const TextStyle(color: Colors.blueGrey)),
                         title: Text(chapter['name_simple'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
                         subtitle: Text(chapter['translated_name']['name'], style: const TextStyle(color: Colors.grey)),
+                        // --- RESTORED FAVORITE BUTTON ---
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -143,11 +159,7 @@ class _PlayerPageState extends State<PlayerPage> {
                               onPressed: () async {
                                 final user = FirebaseAuth.instance.currentUser;
                                 if (user == null) return;
-
-                                final docRef = FirebaseFirestore.instance
-                                    .collection('users').doc(user.uid)
-                                    .collection('favorites').doc(chapterId);
-                                
+                                final docRef = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('favorites').doc(chapterId);
                                 if (isFav) {
                                   await docRef.delete();
                                   if (mounted) setState(() => _favoritedIds.remove(chapterId));
@@ -157,7 +169,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                 }
                               },
                             ),
-                            const Icon(Icons.play_circle_fill, color: Colors.blueAccent),
+                            const Icon(Icons.play_arrow, color: Colors.blueAccent),
                           ],
                         ),
                         onTap: () => _play(chapter['id'], chapter['name_simple']),
@@ -166,6 +178,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ),
                 
+                // BOTTOM CONTROL PANEL
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
                   decoration: const BoxDecoration(
@@ -178,8 +191,8 @@ class _PlayerPageState extends State<PlayerPage> {
                       const SizedBox(height: 10),
                       
                       Slider(
-                        value: _position.inSeconds.toDouble(),
-                        max: _duration.inSeconds > 0 ? _duration.inSeconds.toDouble() : 1.0,
+                        value: _position.inSeconds.toDouble().clamp(0.0, _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0),
+                        max: _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0,
                         activeColor: Colors.blueAccent,
                         inactiveColor: Colors.white10,
                         onChanged: (v) async {
@@ -192,8 +205,8 @@ class _PlayerPageState extends State<PlayerPage> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(_formatDuration(_position), style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                            Text(_formatDuration(_duration), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            Text(_formatDuration(_position), style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
+                            Text(_formatDuration(_duration), style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
                           ],
                         ),
                       ),

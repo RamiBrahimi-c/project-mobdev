@@ -215,6 +215,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 const SizedBox(height: 10),
                 _buildFavoritesList(user.uid),
               ],
+              
             ),
           );
         },
@@ -253,6 +254,7 @@ class _ProfilePageState extends State<ProfilePage> {
             minHeight: 8,
           ),
         ],
+        
       ),
     );
   }
