@@ -8,6 +8,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/audio_manager.dart';
 import 'package:flutter/services.dart';
 
+import '../main.dart';
+
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
   @override
@@ -110,7 +112,15 @@ class _PlayerPageState extends State<PlayerPage> {
     String chapterId = id.toString().padLeft(3, '0');
     await _audioPlayer.play(UrlSource("$_selectedServer$chapterId.mp3"));
     Future.delayed(const Duration(seconds: 2), () => _syncExistingPlayer());
-  }
+    String audioUrl = "$_selectedServer$chapterId.mp3";
+
+    try {
+      audioHandler.updateMetadata(name, _selectedReciterName);
+    } catch (e) {
+      debugPrint("AudioHandler not ready yet: $e");
+    }
+  
+  await _audioPlayer.play(UrlSource(audioUrl));  }
 
   String _formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");

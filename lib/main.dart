@@ -1,4 +1,5 @@
-import 'dart:async'; // Required for memory management
+import 'dart:async';
+import 'package:audio_service/audio_service.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:final_final/services/audio_manager.dart';
 import 'package:final_final/services/biometric_service.dart';
@@ -10,24 +11,49 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/auth_service.dart'; 
+import 'services/audio_handler.dart'; 
 import 'screens/login_page.dart';
 import 'screens/biometric_screen.dart';
 import 'screens/player_page.dart'; 
 
+// global handle
+late MyAudioHandler audioHandler;
+
 void main() async {
+  // 1. setup hardware bindings 
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  
+  // 2. init firebase database
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase init error: $e");
+  }
+
+  // 3. init audio service with a safety satch to prevent black screen
+  try {
+    audioHandler = await AudioService.init(
+      builder: () => MyAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.tp.final_final.audio',
+        androidNotificationChannelName: 'SecureStream Playback',
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  } catch (e) {
+    debugPrint("Hardware Audio Init Failed: $e");
+  }
+
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark().copyWith(
-      scaffoldBackgroundColor: const Color(0xFF0F172A), // Midnight
+      scaffoldBackgroundColor: const Color(0xFF0F172A),
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent, brightness: Brightness.dark),
     ),
     home: const AppStartGate(),
   ));
 }
 
-// THE BIOMETRIC WALL
 class AppStartGate extends StatefulWidget {
   const AppStartGate({super.key});
   @override
@@ -41,7 +67,7 @@ class _AppStartGateState extends State<AppStartGate> {
   Widget build(BuildContext context) {
     if (!_isUnlocked) {
       return BiometricScreen(onSuccess: () {
-        setState(() => _isUnlocked = true);
+        if (mounted) setState(() => _isUnlocked = true);
       });
     }
 
@@ -58,17 +84,17 @@ class _AppStartGateState extends State<AppStartGate> {
   }
 }
 
-// THE DASHBOARD
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
+
 class _ProfilePageState extends State<ProfilePage> {
   int _monthlyGoal = 20;
   final List<double> _dailyMinutes = [45, 120, 30, 90, 60, 15, 100]; 
-
-  // 1. CREATE A VARIABLE TO HOLD THE PROFILE FUTURE
+  
+  // CACHED FUTURE: Fixes the "Blink" and "Null Assignment" errors
   late Future<Map<String, dynamic>?> _profileFuture;
 
   bool _isPlaying = false;
@@ -83,7 +109,7 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadGoal();
     
-    // 2. INITIALIZE THE FUTURE ONCE HERE
+    // Cache the future once in initState
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _profileFuture = AuthService().getProfile(user.uid);
@@ -111,15 +137,18 @@ class _ProfilePageState extends State<ProfilePage> {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) setState(() => _monthlyGoal = prefs.getInt('monthly_goal') ?? 20);
   }
+  
   _updateGoal(int newGoal) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('monthly_goal', newGoal);
     setState(() => _monthlyGoal = newGoal);
   }
+
   String _getTotalTime() {
     double totalMinutes = _dailyMinutes.reduce((a, b) => a + b);
     return "${(totalMinutes / 60).floor()} h ${(totalMinutes % 60).toInt()} m";
   }
+
   void _secureDelete(DocumentReference docRef) async {
     bool authenticated = await BiometricService.authenticate();
     if (authenticated) await docRef.delete();
@@ -130,9 +159,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = FirebaseAuth.instance.currentUser!;
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
-      // PERSISTENT MINI PLAYER
       bottomNavigationBar: AudioManager.hasActiveTrack ? _buildMiniPlayer() : null,
-      
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
@@ -150,7 +177,6 @@ class _ProfilePageState extends State<ProfilePage> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          
           final data = snapshot.data ?? {"firstName": "Guest", "lastName": ""};
           
           return SingleChildScrollView(
@@ -321,6 +347,3 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
-
-
-
