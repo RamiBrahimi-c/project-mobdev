@@ -38,6 +38,7 @@ void main() async {
         androidNotificationChannelId: 'com.tp.final_final.audio',
         androidNotificationChannelName: 'SecureStream Playback',
         androidStopForegroundOnPause: true,
+        androidNotificationOngoing: true,
       ),
     );
   } catch (e) {

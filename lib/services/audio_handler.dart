@@ -10,6 +10,10 @@ class MyAudioHandler extends BaseAudioHandler {
     _player.onPlayerStateChanged.listen((state) {
       playbackState.add(playbackState.value.copyWith(
         playing: state == PlayerState.playing,
+        processingState: state == PlayerState.stopped 
+        ? AudioProcessingState.idle 
+        : AudioProcessingState.ready,
+        
         controls: [
           MediaControl.pause,
           MediaControl.play,
@@ -29,7 +33,14 @@ class MyAudioHandler extends BaseAudioHandler {
   Future<void> pause() => _player.pause();
 
   @override
-  Future<void> stop() => _player.stop();
+  Future<void> stop() async {
+    await _player.stop(); // Stop the hardware
+    playbackState.add(playbackState.value.copyWith(
+      playing: false,
+      processingState: AudioProcessingState.idle, // Tells Android we are done
+    ));
+    return super.stop(); // This kills the notification
+  }
 
   // updates the actual Text and Image in the notification bar
   void updateMetadata(String title, String reciter) {
